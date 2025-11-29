@@ -1,0 +1,136 @@
+#include <DHT.h> // DHT sensor library header
+#include <DHT_U.h> // DHT sensor library header
+#include <LiquidCrystal.h> // liquid crystal display library header
+
+#define Type DHT11 // Type of DHT sensor defined (DHT11)
+
+// sensor and actuator pins used
+// Device Pins used
+const int SensorPin = 32; // DHT11 sesnor input pin location
+const int FanPin = 33; // Fan output pin location (DC motor)
+const int EnablePin = 3; // enable driver input pin location (1,2EN)
+const int SwitchPin = 13; // Switch input pin location
+
+//LCD dispaly pin locartions
+const int rs = 7;
+const int en = 8;
+const int d4 = 9;
+const int d5 = 10;
+const int d6 = 11;
+const int d7 = 12;
+
+DHT sensor (SensorPin, Type); // DHT sensor Defintion
+
+LiquidCrystal lcd (rs,en,d4,d5,d6,d7); //LCD declartion
+
+//ubidots-control variables
+String ThresholdTemp; // threshold temperature in degrees celcius from ubidots
+String FanControl; // to control ON/OFF status of the fan (DC motor) from ubidots
+String command;
+int FirstIndex = 0; // Array index for storing Threshold
+int SecondIndex = 0;// Array index for FanControl
+
+//DHT sesning + fan control variables
+float humidity; // measured saturated humidity percantage
+float tempC; // measured temperature in degrees celcius
+int FanState; // to send the current state of the fan to ubidots
+int SampleDelay = 1000; // 3.0s samplting period
+int StartUp = 500; // 0.5s startup delay
+int Switch; // switch position
+
+
+//setup
+void setup() {
+Serial.begin(9600);
+sensor.begin(); // sensor created
+lcd.begin(16,2); // LCD created and size declared (16 columns, 2 rows)
+delay(StartUp); // start up sequence
+pinMode(SensorPin, INPUT); // defining sensor pin
+pinMode(FanPin, OUTPUT); // defining fan pin
+pinMode(EnablePin, OUTPUT); // EN pin of driver
+pinMode(SwitchPin, INPUT); // Switch defined
+digitalWrite(EnablePin, HIGH); // Turn on the L293D Driver enable logic
+ThresholdTemp = " ";
+FanControl = "0";
+}
+
+//Data acqusition and fan control
+void loop() {
+// Monitoring variables defined
+humidity = sensor.readHumidity(); // measuring saturated humidity percentage
+tempC = sensor.readTemperature(); // measuring temperature in degrees celcius
+FanState = digitalRead(FanPin); // initializes state of fan
+Switch = digitalRead(SwitchPin); // defining Switch position
+
+
+//parsing string from ubidots and serial buffer into individual control values
+if (Serial.available()>0)
+{
+//full string receieved from labview
+command = Serial.readStringUntil('\n');
+
+//parse the command string
+FirstIndex = command.indexOf(',');
+SecondIndex = command.indexOf(',',FirstIndex + 1);
+
+//initializing threshold temperature
+ThresholdTemp = command.substring(0,FirstIndex);
+
+//initializing fan toggle switch state
+FanControl = command.substring(FirstIndex+1,SecondIndex);
+}
+
+// Mode 1: Manual override from Ubidots
+if (FanControl == "1") // ubidots control: turn fan on
+{
+FanState = HIGH;
+}
+
+else if (FanControl == "0") // ubidots control: turn fan off
+{
+
+// Mode 2: Manual temperature control override (switch is high)
+if (Switch == HIGH)
+{
+FanState = HIGH;
+}
+
+// Mode 3: Automatic temperature control
+else if (tempC >= ThresholdTemp.toFloat() && ThresholdTemp != " ") // when above setpoint
+{
+FanState = HIGH;
+}
+
+else // when below setpoint and/or switch is off
+{
+FanState = LOW;
+}
+
+}
+
+// output desired conditional fan operation
+digitalWrite(FanPin, FanState);
+
+// Print temperature and humidity data to serial monitor
+Serial.print(tempC); // Printing temperature in serial monitor
+Serial.print(",");
+Serial.print(humidity); // Printing humidity in serial monitor
+Serial.print(",");
+Serial.println(FanState); // Printing humidity in serial monitor
+
+//Displaying temperature on LCD
+lcd.setCursor(0,0);
+lcd.print("Temp. C:");
+lcd.setCursor(10,0);
+lcd.print(tempC);
+
+//Displaying humidity percent on LCD
+lcd.setCursor(0,1);
+lcd.print("Humidity:");
+lcd.setCursor(10,1);
+lcd.print(humidity);
+lcd.setCursor(15,1);
+lcd.print("%");
+
+delay(SampleDelay); // sampling delay
+}
